@@ -1,0 +1,416 @@
+---
+title: "Textual Analysis on Amazon Reviews"
+author: "Hassaan Ahmed Siddiqui"
+date: "5/29/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(jsonlite)
+library(tidyverse)
+library(data.table)
+library(rjson)
+library(jsonlite)
+library(stringr)
+library(tidytext)
+library(textdata)
+library(topicmodels) 
+library(tm) 
+library(SnowballC)
+library(textmineR)
+```
+
+
+
+I selected user reviews on beauty and baby products from Amazon website. I converted the JSONs into CSVs using python (I found it relatively easy).
+
+**Hypothesis**: Customers (women in the above product categories) are more detailed and critical in their reviews when it comes to baby products as compared to beauty products.
+
+**Assumptions**:
+
+- Beauty and cosmetics are used interchangably.
+- **Anger**, **fear**, **digust** and **surprise** as **critical sentiments** for reviews
+- Average length of all the reviews is considered as an element of detail in the review.
+
+**About the dataset**:
+
+- baby: The master file have 160k reviews on baby products along with other feeatures like reviewer name, Id, review time and summary. However, the data was not sub divided into the category of baby products.
+- cosmetics: The master file have 198k reviews along with other feeatures like reviewer name, Id, review time and summary. However, the data was not sub divided into the category of beauty products.
+
+Reading csv files
+```{r, results='hide', warning=FALSE}
+ 
+baby <- read_csv("baby_reviews.csv")
+beauty <- read_csv("cosmetics_reviews.csv")
+
+```
+
+
+Data preparation
+```{r, results='hide'}
+
+# selecting useful columns
+baby_1 <- baby %>% 
+  select(reviewerID, reviewerName, reviewTime, reviewText, summary, overall) %>%   
+  rename(id = reviewerID, name = reviewerName, reviews = reviewText, 
+         year = reviewTime, overall_rating = overall) 
+
+# select only the year value from year column
+baby_1$year <- word(baby_1$year,-1)
+
+
+# selecting useful columns
+beauty_1 <- beauty %>% 
+  select(reviewerID, reviewerName, reviewTime, reviewText, summary, overall) %>%   
+  rename(id = reviewerID, name = reviewerName, reviews = reviewText, 
+         year = reviewTime, overall_rating = overall) 
+  
+
+# select only the year value from year column
+beauty_1$year <- word(beauty_1$year,-1)
+
+```
+
+
+
+calculating the average length of the reviews in baby category
+```{r, results='hide'}
+# selecting year 2013 for analysis
+baby_13 <- baby_1 %>% 
+  mutate(category = "baby") %>% 
+  filter(year == 2013) %>% 
+  select(id, name, reviews, category)
+
+# review length or each review
+baby_13$review_length = str_length(baby_13$reviews)
+
+# average length of reviews 
+average_review_length_baby <- baby_13 %>%
+  group_by(category) %>%   
+  summarise(count = n(),
+            average_length = sum(baby_13[, 'review_length'], na.rm = TRUE)/(count))
+
+```
+
+
+
+
+calculating the average length of the reviews in beauty category
+```{r, results='hide'}
+beauty_13 <- beauty_1 %>% 
+   mutate(category = "beauty") %>% 
+  filter(year == 2013) %>% 
+  select(id, name, reviews, category)
+
+# To set the same number of rows as baby_13
+beauty_13 <- beauty_13[1:62223, ] 
+
+# review length or each review
+beauty_13$review_length = str_length(beauty_13$reviews)
+
+# average length of reviews 
+average_review_length_beauty <- beauty_13 %>%
+  group_by(category) %>%   
+  summarise(count = n(),
+            average_length = sum(beauty_13[, 'review_length'], na.rm = TRUE)/(count))
+
+
+```
+
+
+
+Comparing the length of reviews for both categories
+```{r}
+
+compare_review_length <- rbind.data.frame(average_review_length_baby, 
+                                          average_review_length_beauty) %>% 
+  rename(count_of_value = count)
+compare_review_length
+
+```
+
+The number of rows for both the categories was kept the same (62,223) to make comparison accurate as possible. The average length of reviews for baby category is more than the beauty category. Therefore, at this point it is safe to assume that on average customers(women in our case) write on average 67 characters more in baby category as compared to beauty category.But this number is not significant enough to accept the hypothesis. 
+
+
+
+
+tokenizing and removing stop words from the baby category
+```{r, results='hide', message=FALSE}
+tidy_baby <- baby_13 %>% 
+  unnest_tokens(word, reviews) %>% 
+  anti_join(stop_words)
+
+count_baby <- tidy_baby %>%
+  count(word, sort = TRUE) %>% 
+  head(10)
+count_baby
+```
+
+
+
+
+tokenizing and removing stop words from the beauty category
+```{r, results='hide', message=FALSE}
+tidy_beauty <- beauty_13 %>%
+  unnest_tokens(word, reviews) %>%
+  anti_join(stop_words)
+
+count_beauty <- tidy_beauty %>%
+  count(word, sort = TRUE) %>% 
+  head(10)
+count_beauty
+
+```
+
+
+
+
+Comparing the common top words from both categories
+```{r}
+compare_count <- inner_join(count_baby, count_beauty, by = "word") %>% 
+  rename(count_baby = n.x, count_beauty = n.y)
+compare_count
+
+```
+
+
+We can see that **love**, **time** and **product** are the common top words for both the categories. As we can see the count of the common words in pretty much the same except **product** which hints us that women discuss more about how much likes/loves the product.On the other hand, in cosmetic category they discuss more about product itself which again makes sense as they are the ones using it 
+
+
+**SENTIMENT ANALYSIS**
+
+
+summarizing results of lexicons for baby category
+```{r, results='hide'}
+
+tidy_baby_nrc <- tidy_baby %>% 
+ inner_join(get_sentiments("nrc")) %>% 
+ count(sentiment,sort=T)
+tidy_baby_nrc
+```
+
+
+
+summarizing results of lexicons for beauty category
+```{r, results='hide'}
+
+tidy_beauty_nrc <- tidy_beauty %>% 
+ inner_join(get_sentiments("nrc")) %>% 
+ count(sentiment,sort=T)
+tidy_beauty_nrc
+```
+
+
+
+
+Comparing the sentiments (nrc) of baby and beauty category
+
+Considering sentiments **anger**, **fear**, **digust** and **surprise** as **critical sentiments** for reviews.
+```{r}
+
+compare_nrc <- inner_join(tidy_baby_nrc, tidy_beauty_nrc, by = "sentiment") %>% 
+  rename(baby = n.x, cosmetics = n.y) %>% 
+  mutate(difference = baby - cosmetics) %>% 
+  filter(sentiment %in% c("anger", "fear", "disgust", "surprise"))
+compare_nrc
+
+
+```
+
+As depicted in the above table, the critical sentiments are more prevalent when reviewing cosmetics/beauty products.  
+
+
+
+**TOPIC MODELLING**
+
+Topic Modelling via LDA
+```{r, results='hide'}
+# fraction of the data is taken so that R does not run into fatal error.
+tidy_baby_mini <- tidy_baby %>% 
+  sample_frac(0.1,replace = TRUE)
+
+
+# fraction of the data is taken so that R does not run into fatal error.
+tidy_beauty_mini <- tidy_beauty %>% 
+  sample_frac(0.1,replace = TRUE)
+
+
+```
+
+
+
+Merging both the baby and beauty mini datasets for topic modelling
+```{r, results='hide'}
+
+# To have the same number of observations as tidy_baby_mini
+tidy_beauty_micro <- tidy_beauty_mini[1:181103, ] 
+
+
+# Binding both the dfs
+baby_beauty_mini <- rbind.data.frame(tidy_baby_mini, tidy_beauty_micro)
+
+
+# fraction of the data is taken so that R does not run into fatal error.
+baby_beauty_mini <- baby_beauty_mini %>% 
+  sample_frac(0.5, replace = TRUE) %>% 
+  drop_na()
+
+
+```
+
+
+```{r, results='hide'}
+# Right now our data frame word_counts is in a tidy form, 
+# with one-term-per-document-per-row, 
+# but the topicmodels package requires a DocumentTermMatrix
+dtm_mini <- baby_beauty_mini %>% 
+    count(id, word) %>%
+    cast_dtm(id, word, n)
+dtm_mini
+
+
+# We can then use the LDA() function to create a four-topic model
+mini_lda <- LDA(dtm_mini, k = 4, control = list(seed = 1234))
+mini_lda
+```
+
+
+examine per-topic-per-word probabilities
+```{r, results='hide'}
+mini_topics <- tidy(mini_lda, matrix = "beta")
+mini_topics
+
+```
+
+
+find the top 10 terms within each topic
+```{r, results='hide'}
+top_mini_terms <- mini_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+top_mini_terms
+
+```
+
+
+
+Visualization
+```{r}
+
+top_mini_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered()
+
+```
+
+
+
+The purpose to perfrom topic modelling was to see the difference in words used in both categories. Although there were some common words but we could see that terms in topic **1** and **4** are related to cosmetic/beauty category as the words like color, 34, dry, brush and hair are pertinant to cosmetics. 
+
+
+
+**Using Summary column (review summary) to do topic modelling for further verification**
+
+tokenizing and removing stop words from the combined data
+```{r, results='hide'}
+# selecting year 2013 for analysis
+
+baby_beauty_summary <- rbind.data.frame(baby_1, beauty_1) %>% 
+  filter(year == 2013) %>%
+  select(id, summary)
+
+data("stop_words")
+
+tidy_bb_summary <- baby_beauty_summary %>% 
+  unnest_tokens(word, summary) %>% 
+  anti_join(stop_words)
+
+tidy_bb_summary %>%
+  count(word, sort = TRUE)
+
+```
+
+
+
+Topic modelling based on review summary
+```{r, results='hide'}
+# Right now our data frame word_counts is in a tidy form, 
+# with one-term-per-document-per-row, 
+# but the topicmodels package requires a DocumentTermMatrix
+dtm_summary <- tidy_bb_summary %>% 
+    count(id, word) %>%
+    cast_dtm(id, word, n)
+dtm_summary
+
+
+# We can then use the LDA() function to create a four-topic model
+summary_lda <- LDA(dtm_summary, k = 4, control = list(seed = 1234))
+summary_lda
+```
+
+
+
+
+examine per-topic-per-word probabilities
+```{r, results='hide'}
+summary_topics <- tidy(summary_lda, matrix = "beta")
+summary_topics
+
+```
+
+
+find the top 10 terms within each topic
+```{r, results='hide'}
+top_summary_terms <- summary_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+top_summary_terms
+
+```
+
+
+
+Visualization
+```{r}
+
+top_summary_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered()
+
+```
+
+
+The above graphs clearly shows that topic **2** and **3** are from cosmetics category as they have terms specific to beauty products. Therefore, it is verified that the reviews had a different vocablary for both categories.
+
+
+**Conclusion**
+
+The sentiment analysis done using **NRC** reveals that women are more critical in writing reviews on beauty products as compared to the baby products. Therefore, the initial hypothesis is rejected.
+
+Regarding the detail of the reviews there is no concrete evidence that women are more detailed in their reviews on baby category.There is only a difference of 67 characters which not substantial enough for any concrete conclusion.
+
+
+
+-----------------------------------------------------END OF DOCUMENT------------------------------------------------------------
+
+
